@@ -1,8 +1,16 @@
-$MANAGED_IDENTITY_RESOURCE_ID
-$AZURE_RESOURCE_GROUP
-$AI_FOUNDATION_PROJECT_NAME
-$AI_FOUNDATION_ACCOUNT_NAME
-$GPT_MODEL_NAME
+param(
+  [Parameter(Mandatory=$true)]
+  [string]$AZURE_RESOURCE_GROUP,
+  
+  [Parameter(Mandatory=$true)]
+  [string]$AI_FOUNDATION_PROJECT_NAME,
+  
+  [Parameter(Mandatory=$true)]
+  [string]$AI_FOUNDATION_ACCOUNT_NAME,
+  
+  [Parameter(Mandatory=$true)]
+  [string]$GPT_MODEL_NAME
+)
 
 try {
     Write-Output "Installing Azure PowerShell modules..."

@@ -1,0 +1,696 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "webAppName": {
+            "minLength": 2,
+            "maxLength": 60,
+            "type": "String",
+            "metadata": {
+                "description": "Name of the web application"
+            }
+        },
+        "appServicePlanName": {
+            "defaultValue": "[concat(parameters('webAppName'), '-plan')]",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the App Service Plan"
+            }
+        },
+        "managedIdentityName": {
+            "defaultValue": "[concat(parameters('webAppName'), '-identity')]",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the user-assigned managed identity"
+            }
+        },
+        "cosmosDbAccountName": {
+            "defaultValue": "[concat(parameters('webAppName'), '-cosmos')]",
+            "minLength": 3,
+            "maxLength": 44,
+            "type": "String",
+            "metadata": {
+                "description": "Name of the Cosmos DB account"
+            }
+        },
+        "cosmosDbDatabaseName": {
+            "defaultValue": "RAGDatabase",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the Cosmos DB database"
+            }
+        },
+        "aiServicesName": {
+            "defaultValue": "foundry",
+            "maxLength": 9,
+            "type": "String",
+            "metadata": {
+                "description": "The name of the Azure AI Foundry resource."
+            }
+        },
+        "aiFoundryProjectName": {
+            "defaultValue": "[concat(parameters('webAppName'), '-foundryproject')]",
+            "type": "String",
+            "metadata": {
+                "description": "The name of your project"
+            }
+        },
+        "aiFoundryProjectDescription": {
+            "defaultValue": "This project is for supporting EasyAgent integration between Azure AI Foundry and Azure App Service Web Apps. This project supports both the chatbot and the agent(s).",
+            "type": "String",
+            "metadata": {
+                "description": "The description of your Azure AI Foundry Project"
+            }
+        },
+        "deploymentTimestamp": {
+            "defaultValue": "[utcNow('yyyyMMddHHmmss')]",
+            "type": "String"
+        },
+        "foundryLocation": {
+            "defaultValue": "westus",
+            "allowedValues": [
+                "australiaeast",
+                "canadaeast",
+                "eastus",
+                "eastus2",
+                "francecentral",
+                "japaneast",
+                "koreacentral",
+                "norwayeast",
+                "polandcentral",
+                "southindia",
+                "swedencentral",
+                "switzerlandnorth",
+                "uaenorth",
+                "uksouth",
+                "westus",
+                "westus3",
+                "westeurope",
+                "southeastasia"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "The Azure region where your AI Foundry resource and project will be created."
+            }
+        },
+        "gptModelName": {
+            "defaultValue": "gpt-4o",
+            "type": "String",
+            "metadata": {
+                "description": "The name of the OpenAI model you want to deploy"
+            }
+        },
+        "gptModelFormat": {
+            "defaultValue": "OpenAI",
+            "type": "String",
+            "metadata": {
+                "description": "The model format of the model you want to deploy. Example: OpenAI"
+            }
+        },
+        "gptModelVersion": {
+            "defaultValue": "2024-11-20",
+            "type": "String",
+            "metadata": {
+                "description": "The version of the model you want to deploy. Example: 2024-11-20"
+            }
+        },
+        "gptModelSkuName": {
+            "defaultValue": "GlobalStandard",
+            "type": "String",
+            "metadata": {
+                "description": "The SKU name for the model deployment. Example: GlobalStandard"
+            }
+        },
+        "gptModelCapacity": {
+            "defaultValue": 30,
+            "type": "Int",
+            "metadata": {
+                "description": "The capacity of the model deployment in TPM."
+            }
+        },
+        "embeddingModelName": {
+            "defaultValue": "text-embedding-3-small",
+            "type": "String",
+            "metadata": {
+                "description": "Name for the text embedding model deployment"
+            }
+        },
+        "openApiSpecJson": {
+            "type": "String",
+            "metadata": {
+                "description": "Contents of OpenAPI specification file"
+            }
+        },
+        "location": {
+            "defaultValue": "[resourceGroup().location]",
+            "type": "String",
+            "metadata": {
+                "description": "Location for all resources other than Foundry (foundry still has limited regional availability, but other resources can be deployed in any region. Recommendation is to keep the region consistent with the Foundry resource in order to minimize latency)."
+            }
+        },
+        "sku": {
+            "defaultValue": "P1",
+            "allowedValues": [
+                "B1",
+                "B2",
+                "B3",
+                "S1",
+                "S2",
+                "S3",
+                "P1",
+                "P2",
+                "P3"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "App Service Plan SKU"
+            }
+        }
+    },
+    "variables": {
+        "uniqueSuffix": "[substring(uniqueString(format('{0}-{1}', resourceGroup().id, parameters('deploymentTimestamp'))), 0, 4)]",
+        "foundryAccountNameUniqueSuffix": "[toLower(format('{0}{1}', parameters('aiServicesName'), variables('uniqueSuffix')))]",
+        "roleDefinitions": {
+            "cosmosDbContributor": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+            "cosmosDbDataReader": "fbdf93bf-df7d-467e-a4d2-9458aa1360c8",
+            "azureAIProjectManager": "eadc314b-1a2d-4efa-be10-5d325db5065e",
+            "cognitiveServicesContributor": "25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68",
+            "azureAIUser": "53ca6127-db72-4b80-b1b0-d745d6d5456d",
+            "azureAIAccountOwner": "e47c6f54-e4a2-4754-9501-8e0985b135e1"
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "apiVersion": "2023-01-31",
+            "name": "[parameters('managedIdentityName')]",
+            "location": "[parameters('location')]",
+            "metadata": {
+                "description": "User-assigned managed identity for the web application"
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2022-09-01",
+            "name": "[parameters('appServicePlanName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('sku')]"
+            },
+            "kind": "app",
+            "properties": {},
+            "metadata": {
+                "description": "Windows App Service Plan for the web application"
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2022-09-01",
+            "name": "[parameters('webAppName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+            ],
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]": {}
+                }
+            },
+            "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "siteConfig": {
+                    "netFrameworkVersion": "v8.0",
+                    "use32BitWorkerProcess": false,
+                    "metadata": [
+                        {
+                            "name": "CURRENT_STACK",
+                            "value": "dotnet"
+                        }
+                    ],
+                    "appSettings": [
+                        {
+                            "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+                            "value": "true"
+                        },
+                        {
+                            "name": "ENABLE_ORYX_BUILD",
+                            "value": "true"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_FOUNDRY_ENDPOINT",
+                            "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))).endpoints['AI Foundry API']]"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_FOUNDRY_AGENTID",
+                            "value": ""
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_FOUNDRY_CHAT_MODEL",
+                            "value": "[parameters('gptModelName')]"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_FOUNDRY_EMBEDDING_MODEL",
+                            "value": "[parameters('embeddingModelName')]"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_SITECONTEXT_DB_ENDPOINT",
+                            "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))).documentEndpoint]"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_FOUNDRY_OPENAPISPEC",
+                            "value": "[parameters('openApiSpecJson')]"
+                        },
+                        {
+                            "name": "WEBSITE_EASYAGENT_SITECONTEXT_DB_NAME",
+                            "value": "[parameters('cosmosDbDatabaseName')]"
+                        },
+                        {
+                            "name": "WEBSITE_MANAGED_CLIENT_ID",
+                            "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).clientId]"
+                        }
+                    ]
+                }
+            },
+            "metadata": {
+                "description": "Web application with managed identity"
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites/siteextensions",
+            "apiVersion": "2022-09-01",
+            "name": "[concat(parameters('webAppName'), '/EasyAgent')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+            ],
+            "properties": {},
+            "metadata": {
+                "description": "Easy Agent Extension site extension for the web application"
+            }
+        },
+        {
+            "type": "Microsoft.DocumentDB/databaseAccounts",
+            "apiVersion": "2023-04-15",
+            "name": "[parameters('cosmosDbAccountName')]",
+            "location": "[parameters('location')]",
+            "kind": "GlobalDocumentDB",
+            "properties": {
+                "consistencyPolicy": {
+                    "defaultConsistencyLevel": "Session"
+                },
+                "locations": [
+                    {
+                        "locationName": "[parameters('location')]",
+                        "failoverPriority": 0,
+                        "isZoneRedundant": false
+                    }
+                ],
+                "databaseAccountOfferType": "Standard",
+                "enableAutomaticFailover": false,
+                "enableMultipleWriteLocations": false,
+                "capabilities": [
+                    {
+                        "name": "EnableServerless"
+                    }
+                ]
+            },
+            "metadata": {
+                "description": "Cosmos DB account with serverless billing"
+            }
+        },
+        {
+            "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+            "apiVersion": "2023-04-15",
+            "name": "[concat(parameters('cosmosDbAccountName'), '/', parameters('cosmosDbDatabaseName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+            ],
+            "properties": {
+                "resource": {
+                    "id": "[parameters('cosmosDbDatabaseName')]"
+                }
+            },
+            "metadata": {
+                "description": "Cosmos DB database"
+            }
+        },
+        {
+            "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions",
+            "apiVersion": "2023-04-15",
+            "name": "[concat(parameters('cosmosDbAccountName'), '/', guid('easyAgentScraperCustomRole', resourceGroup().id))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+            ],
+            "properties": {
+                "roleName": "EasyAgentScraperCustomRole",
+                "type": "CustomRole",
+                "assignableScopes": [
+                    "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+                ],
+                "permissions": [
+                    {
+                        "dataActions": [
+                            "Microsoft.DocumentDB/databaseAccounts/readMetadata",
+                            "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/*",
+                            "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/*"
+                        ],
+                        "notDataActions": []
+                    }
+                ]
+            },
+            "metadata": {
+                "description": "Custom SQL role definition for Cosmos DB"
+            }
+        },
+        {
+            "type": "Microsoft.CognitiveServices/accounts",
+            "apiVersion": "2025-04-01-preview",
+            "name": "[variables('foundryAccountNameUniqueSuffix')]",
+            "location": "[parameters('foundryLocation')]",
+            "sku": {
+                "name": "S0"
+            },
+            "kind": "AIServices",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "allowProjectManagement": true,
+                "customSubDomainName": "[toLower(variables('foundryAccountNameUniqueSuffix'))]",
+                "networkAcls": {
+                    "defaultAction": "Allow",
+                    "virtualNetworkRules": [],
+                    "ipRules": []
+                },
+                "publicNetworkAccess": "Enabled",
+                "disableLocalAuth": true
+            }
+        },
+        {
+            "type": "Microsoft.CognitiveServices/accounts/projects",
+            "apiVersion": "2025-04-01-preview",
+            "name": "[format('{0}/{1}', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+            "location": "[parameters('foundryLocation')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "description": "[parameters('aiFoundryProjectDescription')]",
+                "displayName": "[parameters('aiFoundryProjectName')]"
+            }
+        },
+        {
+            "type": "Microsoft.CognitiveServices/accounts/deployments",
+            "apiVersion": "2024-10-01",
+            "name": "[format('{0}/{1}', variables('foundryAccountNameUniqueSuffix'), parameters('gptModelName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "sku": {
+                "capacity": "[parameters('gptModelCapacity')]",
+                "name": "[parameters('gptModelSkuName')]"
+            },
+            "properties": {
+                "model": {
+                    "name": "[parameters('gptModelName')]",
+                    "format": "[parameters('gptModelFormat')]",
+                    "version": "[parameters('gptModelVersion')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.CognitiveServices/accounts/deployments",
+            "apiVersion": "2024-10-01",
+            "name": "[format('{0}/{1}', variables('foundryAccountNameUniqueSuffix'), parameters('embeddingModelName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('foundryAccountNameUniqueSuffix'), parameters('gptModelName'))]"
+            ],
+            "sku": {
+                "name": "Standard",
+                "capacity": 20
+            },
+            "properties": {
+                "model": {
+                    "format": "OpenAI",
+                    "name": "text-embedding-3-small",
+                    "version": "1"
+                }
+            },
+            "metadata": {
+                "description": "Text embedding model deployment to AI Foundry hub"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), parameters('cosmosDbAccountName'), 'cosmosContributor')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').cosmosDbContributor)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "metadata": {
+                "description": "Cosmos DB Contributor role assignment for managed identity"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), parameters('cosmosDbAccountName'), 'cosmosReader')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').cosmosDbDataReader)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "metadata": {
+                "description": "Cosmos DB Data Reader role assignment for managed identity"
+            }
+        },
+        {
+            "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+            "apiVersion": "2023-04-15",
+            "name": "[concat(parameters('cosmosDbAccountName'), '/', guid(resourceGroup().id, parameters('managedIdentityName'), 'easyAgentScraperCustomRole'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', parameters('cosmosDbAccountName'), guid('easyAgentScraperCustomRole', resourceGroup().id))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', parameters('cosmosDbAccountName'), guid('easyAgentScraperCustomRole', resourceGroup().id))]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+            },
+            "metadata": {
+                "description": "Custom SQL role assignment for managed identity on Cosmos DB"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'azureAIProjectManager')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIProjectManager)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+            "metadata": {
+                "description": "Azure AI Project Manager role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'azureAIUser')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIUser)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'azureAIAccountOwner')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIAccountOwner)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'cognitiveServicesContributor')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').cognitiveServicesContributor)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIProjectManager')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIProjectManager)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+            "metadata": {
+                "description": "Azure AI Project Manager role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIUser')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIUser)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIAccountOwner')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').azureAIAccountOwner)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'cognitiveServicesContributor')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleDefinitions').cognitiveServicesContributor)]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
+                "principalType": "ServicePrincipal"
+            },
+            "scope": "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+            "metadata": {
+                "description": "Azure AI User role assignment for managed identity on AI Foundry account"
+            }
+        }
+    ],
+    "outputs": {
+        "webAppUrl": {
+            "type": "String",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]",
+            "metadata": {
+                "description": "URL of the deployed web application"
+            }
+        },
+        "managedIdentityId": {
+            "type": "String",
+            "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
+            "metadata": {
+                "description": "Resource ID of the managed identity"
+            }
+        },
+        "cosmosDbEndpoint": {
+            "type": "String",
+            "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))).documentEndpoint]",
+            "metadata": {
+                "description": "Cosmos DB endpoint URL"
+            }
+        },
+        "aiFoundryAccountName": {
+            "type": "String",
+            "value": "[variables('foundryAccountNameUniqueSuffix')]"
+        },
+        "aiFoundryProjectName": {
+            "type": "String",
+            "value": "[parameters('aiFoundryProjectName')]"
+        },
+        "accountEndpoint": {
+            "type": "String",
+            "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix')), '2025-04-01-preview').endpoint]"
+        },
+        "projectEndpoint": {
+            "type": "String",
+            "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName')), '2025-04-01-preview').endpoints['AI Foundry API']]",
+            "metadata": {
+                "description": "Endpoint URL for the AI Foundry project"
+            }
+        },
+        "customCosmosRoleDefinitionId": {
+            "type": "String",
+            "value": "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', parameters('cosmosDbAccountName'), 'easyAgentScraperCustomRole')]",
+            "metadata": {
+                "description": "Resource ID of the custom Cosmos DB role definition"
+            }
+        }
+    }
+}

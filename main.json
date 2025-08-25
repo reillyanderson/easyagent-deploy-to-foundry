@@ -212,7 +212,8 @@
                 "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
                 "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]",
-                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]"
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+                "[resourceId('Microsoft.Resources/deploymentScripts', concat('create-agent-', parameters('webAppName')))]"
             ],
             "identity": {
                 "type": "UserAssigned",
@@ -246,7 +247,7 @@
                         },
                         {
                             "name": "WEBSITE_EASYAGENT_FOUNDRY_AGENTID",
-                            "value": ""
+                            "value": "[reference(concat('Microsoft.Resources/deploymentScripts/', concat('create-agent-', parameters('webAppName'))), '2020-10-01').outputs.agentId]"
                         },
                         {
                             "name": "WEBSITE_EASYAGENT_FOUNDRY_CHAT_MODEL",
@@ -445,6 +446,71 @@
             },
             "metadata": {
                 "description": "Text embedding model deployment to AI Foundry hub"
+            }
+        },
+        {
+            "type": "Microsoft.Resources/deploymentScripts",
+            "apiVersion": "2020-10-01",
+            "name": "[concat('create-agent-', parameters('webAppName'))]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('foundryAccountNameUniqueSuffix'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('foundryAccountNameUniqueSuffix'), parameters('gptModelName'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('foundryAccountNameUniqueSuffix'), parameters('embeddingModelName'))]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'azureAIUser')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'azureAIAccountOwner')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), 'cognitiveServicesContributor')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIProjectManager')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIUser')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'azureAIAccountOwner')]",
+                "[guid(subscription().subscriptionId, resourceGroup().id, parameters('managedIdentityName'), variables('foundryAccountNameUniqueSuffix'), parameters('aiFoundryProjectName'), 'cognitiveServicesContributor')]"
+            ],
+            "kind": "AzureCLI",
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]": {}
+                }
+            },
+            "properties": {
+                "AzCliVersion": "2.75.0",
+                "timeout": "PT30M",
+                "retentionInterval": "P1D",
+                "environmentVariables": [
+                    {
+                        "name": "AZURE_RESOURCE_GROUP",
+                        "value": "[resourceGroup().name]"
+                    },
+                    {
+                        "name": "AI_FOUNDRY_PROJECT_NAME",
+                        "value": "[parameters('aiFoundryProjectName')]"
+                    },
+                    {
+                        "name": "AI_FOUNDRY_ACCOUNT_NAME",
+                        "value": "[variables('foundryAccountNameUniqueSuffix')]"
+                    },
+                    {
+                        "name": "GPT_MODEL_NAME",
+                        "value": "[parameters('gptModelName')]"
+                    },
+                    {
+                        "name": "INSTRUCTIONS",
+                        "value": "You are an agent for a web application. Only respond to questions or run actions that are applicable to the web application."
+                    },
+                    {
+                        "name": "AGENT_NAME",
+                        "value": "EasyAgent"
+                    },
+                    {
+                        "name": "API_VERSION",
+                        "value": "2025-05-01"
+                    }
+                ],
+                "primaryScriptUri" : "https://raw.githubusercontent.com/reillyanderson/easyagent-deploy-to-foundry/refs/heads/main/deploy-agent-bash.sh"
+            },
+            "metadata": {
+                "description": "Creates AI agent and returns the agent ID"
             }
         },
         {
@@ -691,6 +757,10 @@
             "metadata": {
                 "description": "Resource ID of the custom Cosmos DB role definition"
             }
+        },
+        "agentId": {
+            "type": "string",
+            "value": "[reference(concat('Microsoft.Resources/deploymentScripts/', concat('create-agent-', parameters('webAppName'))), '2020-10-01').outputs.agentId]"
         }
     }
 }

@@ -1,6 +1,6 @@
 main.json currently deploys:
 - cosmos + db + custom data role
-- foundry + project
+- foundry + project + generic agent
 - MI
 - App Service App Service Plan + Web App
 - Adds role assignments for MI on all resources

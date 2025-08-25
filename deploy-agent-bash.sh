@@ -1,4 +1,3 @@
-echo $MANAGED_IDENTITY_RESOURCE_ID
 echo $AZURE_RESOURCE_GROUP
 echo $AI_FOUNDRY_PROJECT_NAME
 echo $AI_FOUNDRY_ACCOUNT_NAME
@@ -7,8 +6,6 @@ echo $INSTRUCTIONS
 echo $AGENT_NAME
 echo $API_VERSION
 echo "Starting AI Foundry Agent creation using REST API..."
-az login --identity --resource-id $MANAGED_IDENTITY_RESOURCE_ID
-echo "Successfully logged in with managed identity."
 foundryAccessToken=$(az account get-access-token --resource 'https://ai.azure.com' | jq -r .accessToken | tr -d '"')
 echo "Access token for AI Foundry: $foundryAccessToken"
 cognitiveAccountEndpoint=$(az cognitiveservices account show --name $AI_FOUNDRY_ACCOUNT_NAME --resource-group $AZURE_RESOURCE_GROUP --query 'properties.endpoints."AI Foundry API"' -o tsv)
@@ -22,6 +19,6 @@ result=$(curl -X POST "$url" -H "Authorization: Bearer ${foundryAccessToken}" -H
 echo "Result: $result"
 resultContentJson=$(echo $result | jq -r .)
 echo $resultContentJson
-agentId=$(echo $resultContentJson | jq -r .id)
-echo $agentId
+echo $resultContentJson | jq -r '{ agentId: .id}'
+echo $resultContentJson | jq -r '{ agentId: .id}' > $AZ_SCRIPTS_OUTPUT_PATH
 exit 0

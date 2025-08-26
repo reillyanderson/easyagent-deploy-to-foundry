@@ -315,6 +315,9 @@
                 "capabilities": [
                     {
                         "name": "EnableServerless"
+                    },
+                    {
+                        "name": "EnableNoSQLVectorSearch"
                     }
                 ]
             },
